@@ -240,7 +240,7 @@ static_always_inline void end_pot_in_rewriting (
 
   // ------------ // 
   FILE* file = fopen("/home/gianluca/Desktop/dump.txt", "a");
-  fprintf(file, "end_pot_in_rewriting\n --------------------- \n");  
+  fprintf(file, ">> end_pot_in_rewriting <<\n --------------------- \n");  
   fclose(file); 
   //
 
