@@ -33,9 +33,14 @@ srv6_pot_in_main_t srv6_pot_in_main;
 
 /*****************************************/
 /* SRv6 LocalSID instantiation and removal functions */
-static int
-srv6_pot_in_localsid_creation_fn (ip6_sr_localsid_t * localsid)
-{
+static int srv6_pot_in_localsid_creation_fn (ip6_sr_localsid_t * localsid) {
+
+  // ---- PRINT ---- // 
+  FILE* file = fopen("/home/gianluca/Desktop/dump.txt", "a");
+  fprintf(file, ">> srv6_pot_in_localsid_creation_fn <<\n --------------------- \n");  
+  fclose(file); 
+  //
+
   srv6_pot_in_main_t *sm = &srv6_pot_in_main;
   srv6_pot_in_localsid_t *ls_mem = localsid->plugin_mem;
   adj_index_t nh_adj_index = ADJ_INDEX_INVALID;
@@ -72,9 +77,14 @@ srv6_pot_in_localsid_creation_fn (ip6_sr_localsid_t * localsid)
   return 0;
 }
 
-static int
-srv6_pot_in_localsid_removal_fn (ip6_sr_localsid_t * localsid)
-{
+static int srv6_pot_in_localsid_removal_fn (ip6_sr_localsid_t * localsid) {
+
+  // ---- PRINT ---- // 
+  FILE* file = fopen("/home/gianluca/Desktop/dump.txt", "a");
+  fprintf(file, ">> srv6_pot_in_localsid_removal_fn <<\n --------------------- \n");  
+  fclose(file); 
+  //
+
   srv6_pot_in_localsid_t *ls_mem = localsid->plugin_mem;
 
   /* Remove hardware indirection (from sr_steering.c:137) */
@@ -98,9 +108,11 @@ srv6_pot_in_localsid_removal_fn (ip6_sr_localsid_t * localsid)
  * Prints nicely the parameters of a localsid
  * Example: print "Table 5"
  */
-u8 *
-format_srv6_pot_in_localsid (u8 * s, va_list * args)
-{
+u8 * format_srv6_pot_in_localsid (u8 * s, va_list * args) {
+  
+  // it is called when teh system need to print the information about the LocalSID
+  // it prints (part of) the configuration about the localsid when 'show sr localsid' is executed
+
   srv6_pot_in_localsid_t *ls_mem = va_arg (*args, void *);
 
   vnet_main_t *vnm = vnet_get_main ();
@@ -199,16 +211,23 @@ static clib_error_t * srv6_pot_in_init (vlib_main_t * vm) {
 
   // executed once at the beginning when the plugin is loaded
 
+  // ---- PRINT ---- // 
+  FILE* file = fopen("/home/gianluca/Desktop/dump.txt", "a");
+  fprintf(file, ">> srv6_pot_in_init <<\n --------------------- \n");  
+  fclose(file); 
+  //
+
+
   srv6_pot_in_main_t *sm = &srv6_pot_in_main;
   int rv = 0;
 
   sm->vlib_main = vm;
   sm->vnet_main = vnet_get_main ();
 
-  /* Create DPO */
+  // Create DPO 
   sm->srv6_pot_in_dpo_type = dpo_register_new_type (&srv6_pot_in_vft, srv6_pot_in_nodes);
 
-  /* Register SRv6 LocalSID */
+  // Register SRv6 LocalSID 
   rv = sr_localsid_register_function (vm,
 				      function_name,
 				      keyword_str,

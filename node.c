@@ -238,7 +238,7 @@ static_always_inline void end_pot_in_rewriting (
 		  vlib_buffer_t * b0,
 		  ip6_header_t * ip0, ip6_sr_header_t * sr0, u32 * next0) {
 
-  // ------------ // 
+  // ---- PRINT ---- // 
   FILE* file = fopen("/home/gianluca/Desktop/dump.txt", "a");
   fprintf(file, ">> end_pot_in_rewriting <<\n --------------------- \n");  
   fclose(file); 
