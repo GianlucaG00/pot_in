@@ -140,7 +140,7 @@ static uword srv6_pot_in_localsid_fn (vlib_main_t * vm, vlib_node_runtime_t * no
 
   // ------------ // 
   FILE* file = fopen("/home/gianluca/Desktop/dump.txt", "a");
-  fprintf(file, "srv6_pot_in_localsid_fn\n --------------------- \n");  
+  fprintf(file, ">> srv6_pot_in_localsid_fn <<\n --------------------- \n");  
   fclose(file); 
   //
 
@@ -238,14 +238,6 @@ static_always_inline void end_pot_in_rewriting (
 		  vlib_buffer_t * b0,
 		  ip6_header_t * ip0, ip6_sr_header_t * sr0, u32 * next0) {
 
-  // ---- PRINT ---- // 
-  FILE* file = fopen("/home/gianluca/Desktop/dump.txt", "a");
-  fprintf(file, ">> end_pot_in_rewriting <<\n --------------------- \n");  
-  fclose(file); 
-  //
-
-
-
   if (PREDICT_FALSE (ip0->protocol != IP_PROTOCOL_IPV6_ROUTE ||
 		     sr0->type != ROUTING_HEADER_TYPE_SR))
     {
@@ -271,6 +263,13 @@ static uword
 srv6_pot_in_rewrite_fn (vlib_main_t * vm,
 		    vlib_node_runtime_t * node, vlib_frame_t * frame)
 {
+
+  // ---- PRINT ---- // 
+  FILE* file = fopen("/home/gianluca/Desktop/dump.txt", "a");
+  fprintf(file, ">>> srv6_pot_in_rewrite_fn <<<\n --------------------- \n");  
+  fclose(file); 
+  //
+
   u32 n_left_from, next_index, *from, *to_next;
   u32 cnt_packets = 0;
 

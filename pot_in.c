@@ -23,6 +23,7 @@
 #include <vnet/plugin/plugin.h>
 #include <vpp/app/version.h>
 #include <srv6_pot_in/pot_in.h>
+#include <vnet/fib/ip6_fib.h>
 
 unsigned char function_name[] = "SRv6-pot_in-plugin";
 unsigned char keyword_str[] = "End.pot_in";
@@ -30,6 +31,8 @@ unsigned char def_str[] = "Endpoint to perform Proof Of Transit over SRv6 Networ
 unsigned char params_str[] = "nh <next-hop> oif <iface-out> iif <iface-in>"; // CLI command
 
 srv6_pot_in_main_t srv6_pot_in_main;
+
+dpo_type_t srv6_pot_in_dpo_type; 
 
 /*****************************************/
 /* SRv6 LocalSID instantiation and removal functions */
@@ -145,7 +148,7 @@ uword unformat_srv6_pot_in_localsid (unformat_input_t * input, va_list * args) {
   u32 sw_if_index_in;
 
   // parse the CLI command 
-  // sr localsid address SID behavior <...here...>
+  // "sr localsid address SID behavior <...here...>"
   if (unformat (input, "end.pot_in nh %U oif %U iif %U",
 		unformat_ip6_address, &nh_addr.ip6,
 		unformat_vnet_sw_interface, vnm, &sw_if_index_out,
@@ -225,8 +228,10 @@ static clib_error_t * srv6_pot_in_init (vlib_main_t * vm) {
   sm->vnet_main = vnet_get_main ();
 
   // Create DPO 
-  sm->srv6_pot_in_dpo_type = dpo_register_new_type (&srv6_pot_in_vft, srv6_pot_in_nodes);
+  srv6_pot_in_dpo_type = dpo_register_new_type (&srv6_pot_in_vft, srv6_pot_in_nodes);
+  sm->srv6_pot_in_dpo_type = srv6_pot_in_dpo_type;
 
+  
   // Register SRv6 LocalSID 
   rv = sr_localsid_register_function (vm,
 				      function_name,
@@ -243,6 +248,7 @@ static clib_error_t * srv6_pot_in_init (vlib_main_t * vm) {
     clib_error_return (0, "SRv6 LocalSID function could not be registered.");
   else
     sm->srv6_localsid_behavior_id = rv;
+  
 
   return 0;
 }
@@ -259,6 +265,115 @@ VLIB_INIT_FUNCTION (srv6_pot_in_init);
 VLIB_PLUGIN_REGISTER () = {
   .version = VPP_BUILD_VER,
   .description = "Proof of transit for SRv6 network",
+};
+
+int pot_in_enable_disable (srv6_pot_in_main_t * sm, ip6_address_t * bsid, int enable_disable) {
+  ip6_sr_main_t *srm = &sr_main; // pointer to SR main datastructure  
+  ip6_sr_policy_t *policy; // pointer to the policy data structure
+  ip6_sr_sl_t *segment_list; // pointer to the segment list data structure
+
+  int rv = 0; // return value
+  uword *p = 0; 
+  u32 *sl_index;
+
+  load_balance_path_t path;
+  path.path_index = FIB_NODE_INDEX_INVALID;
+  load_balance_path_t *ip6_path_vector =0;
+
+  // recover the index of the policy associated with the bsid 
+  p = mhash_get (&srm->sr_policies_index_hash, bsid);
+
+  if(p==0) { 
+		rv = 1;
+ 		return rv;
+	}
+
+  // get the pointer to the existing policy structure that need to be Live-Live configured 
+  policy = pool_elt_at_index(srm->sr_policies, p[0]);
+
+  dpo_reset(&policy->ip6_dpo);
+  dpo_set(&policy->ip6_dpo, srv6_pot_in_dpo_type, DPO_PROTO_IP6, policy - srm->sr_policies);
+
+  // update the FIB to use the configured DPO 
+  fib_prefix_t pfx = {
+    .fp_proto = FIB_PROTOCOL_IP6,
+    .fp_len = 128,
+    .fp_addr = {
+      .ip6 = policy->bsid,
+    }
+  };
+
+  /* Remove existing spray policy DPO from the FIB */  
+  fib_table_entry_special_remove (srm->fib_table_ip6, &pfx, FIB_SOURCE_SR);
+  /* Update FIB entry's DPO pointing the Live-Live processing node */
+  fib_table_entry_special_dpo_update (srm->fib_table_ip6,
+            &pfx,
+            FIB_SOURCE_SR,
+            FIB_ENTRY_FLAG_EXCLUSIVE,
+            &policy->ip6_dpo);
+
+  path.path_weight = 1;
+
+
+  vec_foreach (sl_index, policy->segments_lists){
+    segment_list =  pool_elt_at_index(srm->sid_lists, *sl_index);
+    /* Modify the precompute size to Encap */
+    // segment_list->rewrite = live_compute_rewrite_encaps(segment_list->rewrite); 
+    /* Change the SLs' DPO to the Live-Live encapsulation DPO */
+    dpo_reset(&segment_list->ip6_dpo);
+    dpo_set (&segment_list->ip6_dpo, srv6_pot_in_dpo_type, DPO_PROTO_IP6, segment_list - srm->sid_lists);
+    path.path_dpo = segment_list->ip6_dpo;
+    vec_add1(ip6_path_vector, path);
+  }
+
+  /* Setting the Live-Live policy type*/
+  policy->type = 2;
+  /* Keep modified policy in the plugin*/
+  sm->pot_in_policy = policy;
+
+  return rv;
+}
+
+// ENABLE DISABLE COMMAND
+static clib_error_t * pot_in_enable_disable_command_fn (vlib_main_t * vm, unformat_input_t * input, vlib_cli_command_t * cmd) {
+
+  srv6_pot_in_main_t * sm = &srv6_pot_in_main;
+  ip6_address_t bsid;
+  int enable_disable = 1;
+  int b = 0;
+  int rv;
+
+  while (unformat_check_input (input) != UNFORMAT_END_OF_INPUT) {
+    if (unformat (input, "disable"))
+      enable_disable = 0;
+    else if (unformat (input, "bsid %U", unformat_ip6_address, &bsid))
+      b=1;
+    else
+      break;
+  }
+
+  if (b==0)
+    return clib_error_return (0, "Please specify bsid of the policy");
+    
+  rv = pot_in_enable_disable (sm, &bsid, enable_disable);
+
+  switch(rv) {
+  case 0:
+    break;
+
+  case 1:
+    return clib_error_return (0, "No policies matched with the bsid");
+    break;  
+  default:
+    return clib_error_return (0, "pot_in_enable_disable returned %d", rv);
+  }
+  return 0;
+}
+
+VLIB_CLI_COMMAND (sr_content_command, static) = {
+    .path = "pot_in sr policy",
+    .short_help = "pot_in sr policy bsid <bsid> [disable]",
+    .function = pot_in_enable_disable_command_fn,
 };
 
 /*

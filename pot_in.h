@@ -23,8 +23,7 @@
 #include <vppinfra/error.h>
 #include <vppinfra/elog.h>
 
-typedef struct
-{
+typedef struct {
   u16 msg_id_base;		  /**< API message ID base */
 
   vlib_main_t *vlib_main;	  /**< [convenience] vlib main */
@@ -33,6 +32,9 @@ typedef struct
   dpo_type_t srv6_pot_in_dpo_type;	  /**< DPO type */
 
   u32 srv6_localsid_behavior_id;  /**< SRv6 LocalSID behavior number */
+
+  ip6_sr_policy_t * pot_in_policy;
+  
 } srv6_pot_in_main_t;
 
 /*
