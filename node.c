@@ -16,6 +16,7 @@
 #include <vnet/vnet.h>
 #include <vppinfra/error.h>
 #include <srv6_pot_in/pot_in.h>
+#include <arpa/inet.h>
 
 
 /******************************* Packet tracing *******************************/
@@ -144,69 +145,116 @@ static uword srv6_pot_in_localsid_fn (vlib_main_t * vm, vlib_node_runtime_t * no
   fclose(file); 
   //
 
+  // then error...
+
   ip6_sr_main_t *sm = &sr_main;
   u32 n_left_from, next_index, *from, *to_next;
 
-  from = vlib_frame_vector_args (frame);
+  // (input frame): array of indexes pointing to the buffers
+  from = vlib_frame_vector_args (frame); 
+
+  // number of packets in the input frame
   n_left_from = frame->n_vectors;
+
+  // index of the next node in the graph (chached one)
   next_index = node->cached_next_index;
 
   u32 thread_index = vm->thread_index;
 
-  while (n_left_from > 0)
-    {
+  while (n_left_from > 0) {
+
+      // number of slot available in the output frame
       u32 n_left_to_next;
 
+      // it prepares an output frame in the current node for the next node (next_index): it populates to_next and n_left_to_next
+      // An output frame is a container that collects packets in transit to the next node in the processing pipeline
+	    // vlib_get_next_frame obtains the memory structure where the data packets passed to the next node will reside
       vlib_get_next_frame (vm, node, next_index, to_next, n_left_to_next);
 
       /* TODO: Dual/quad loop */
 
-      while (n_left_from > 0 && n_left_to_next > 0)
-	{
-	  u32 bi0;
-	  vlib_buffer_t *b0;
-	  ip6_header_t *ip0 = 0;
-	  ip6_sr_header_t *sr0;
-	  ip6_sr_localsid_t *ls0;
-	  u32 next0 = SRV6_pot_in_LOCALSID_NEXT_REWRITE;
+    while (n_left_from > 0 && n_left_to_next > 0) {
+	    u32 bi0;
+	    vlib_buffer_t *b0;
+	    ip6_header_t *ip0 = 0;
+	    ip6_sr_header_t *sr0;
+	    ip6_sr_localsid_t *ls0;
+	    u32 next0 = SRV6_pot_in_LOCALSID_NEXT_REWRITE;
 
-	  bi0 = from[0];
-	  to_next[0] = bi0;
-	  from += 1;
-	  to_next += 1;
-	  n_left_from -= 1;
-	  n_left_to_next -= 1;
+	    bi0 = from[0]; // get the index of the first packet in the frame 
+	    to_next[0] = bi0; // 
+	    from += 1; // move the pointer: a packet have been processed 
+	    to_next += 1;
+	    n_left_from -= 1; // decrese the number of packets to be processed
+	    n_left_to_next -= 1;
 
-	  b0 = vlib_get_buffer (vm, bi0);
-	  ip0 = vlib_buffer_get_current (b0);
-	  sr0 = (ip6_sr_header_t *) (ip0 + 1);
+	    b0 = vlib_get_buffer (vm, bi0); // obtain the pointer of the buffer identified by the index bi0 
+	    ip0 = vlib_buffer_get_current (b0); // obtain the pointer to the ipv6 header of the pointer
+	    sr0 = (ip6_sr_header_t *) (ip0 + 1); // obtain the pointer to the segment routing header
 
-	  /* Lookup the SR End behavior based on IP DA (adj) */
-	  ls0 = pool_elt_at_index (sm->localsids,
-				   vnet_buffer (b0)->ip.adj_index[VLIB_TX]);
+      // ------------ // 
+      FILE* file = fopen("/home/gianluca/Desktop/dump.txt", "a");
+      fprintf(file, ">> INFO <<\n"); 
+      fprintf(file, ">> next_header: %u <<\n", ip0->protocol);
+      fprintf(file, ">> protocol: %u <<\n", sr0->protocol);
+      fprintf(file, ">> length: %u <<\n", sr0->length);
+      fprintf(file, ">> type: %u <<\n", sr0->type);
+      fprintf(file, ">> segments_left: %u <<\n", sr0->segments_left);
+      fprintf(file, ">> last_entry: %u <<\n", sr0->last_entry);
+      fprintf(file, ">> flags: 0x%02x <<\n", sr0->flags);
+      fprintf(file, "   - Protected: %s\n", (sr0->flags & IP6_SR_HEADER_FLAG_PROTECTED) ? "Yes" : "No");
+      fprintf(file, "   - OAM: %s\n", (sr0->flags & IP6_SR_HEADER_FLAG_OAM) ? "Yes" : "No");
+      fprintf(file, "   - Alert: %s\n", (sr0->flags & IP6_SR_HEADER_FLAG_ALERT) ? "Yes" : "No");
+      fprintf(file, "   - HMAC: %s\n", (sr0->flags & IP6_SR_HEADER_FLAG_HMAC) ? "Yes" : "No");
+      fprintf(file, ">> tag: %u <<\n", sr0->tag);
 
-	  /* SRH processing */
-	  end_pot_in_processing (b0, ip0, sr0, ls0, &next0);
+      // Stampare gli indirizzi IP dei segmenti
+      int num_segments = (sr0->length + 1) * 8 / sizeof(ip6_address_t);
+      fprintf(file, ">> Segment Addresses:\n");
+      for (int i = 0; i < num_segments; ++i) {
+          char addr_str[INET6_ADDRSTRLEN];
+          inet_ntop(AF_INET6, &sr0->segments[i], addr_str, sizeof(addr_str));
+          fprintf(file, "   - Segment %d: %s\n", i + 1, addr_str);
+      }
 
-	  if (PREDICT_FALSE (b0->flags & VLIB_BUFFER_IS_TRACED))
-	    {
-	      srv6_pot_in_localsid_trace_t *tr =
-		vlib_add_trace (vm, node, b0, sizeof *tr);
-	      tr->localsid_index = ls0 - sm->localsids;
-	    }
+      char src_address[46];
+      char dst_address[46];
+      inet_ntop(10, &ip0->src_address, src_address, 46);
+      inet_ntop(10, &ip0->dst_address, dst_address, 46);
 
-	  /* This increments the SRv6 per LocalSID counters. */
-	  vlib_increment_combined_counter (((next0 ==
-					     SRV6_pot_in_LOCALSID_NEXT_ERROR) ?
-					    &(sm->sr_ls_invalid_counters) :
-					    &(sm->sr_ls_valid_counters)),
-					   thread_index, ls0 - sm->localsids,
-					   1, vlib_buffer_length_in_chain (vm,
-									   b0));
+      fprintf(file, ">> src_address: %s <<\n", src_address);
+      fprintf(file, ">> dst_address: %s <<\n", dst_address);
+      fclose(file); 
+      //
 
-	  vlib_validate_buffer_enqueue_x1 (vm, node, next_index, to_next,
-					   n_left_to_next, bi0, next0);
-	}
+
+
+	    /* Lookup the SR End behavior based on IP DA (adj) */
+	    ls0 = pool_elt_at_index (sm->localsids,
+		  		   vnet_buffer (b0)->ip.adj_index[VLIB_TX]);
+
+	    /* SRH processing */
+	    end_pot_in_processing (b0, ip0, sr0, ls0, &next0);
+
+	    if (PREDICT_FALSE (b0->flags & VLIB_BUFFER_IS_TRACED))
+	      {
+	        srv6_pot_in_localsid_trace_t *tr =
+		  vlib_add_trace (vm, node, b0, sizeof *tr);
+	        tr->localsid_index = ls0 - sm->localsids;
+	      }
+
+	    /* This increments the SRv6 per LocalSID counters. */
+	    vlib_increment_combined_counter (((next0 ==
+		  			     SRV6_pot_in_LOCALSID_NEXT_ERROR) ?
+		  			    &(sm->sr_ls_invalid_counters) :
+		  			    &(sm->sr_ls_valid_counters)),
+		  			   thread_index, ls0 - sm->localsids,
+		  			   1, vlib_buffer_length_in_chain (vm,
+		  							   b0));
+
+	    vlib_validate_buffer_enqueue_x1 (vm, node, next_index, to_next,
+		  			   n_left_to_next, bi0, next0);
+	  } 
 
       vlib_put_next_frame (vm, node, next_index, n_left_to_next);
     }
